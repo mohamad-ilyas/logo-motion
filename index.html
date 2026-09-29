@@ -128,6 +128,11 @@ pre{margin:0;background:var(--code-bg);color:var(--code-ink);font:400 12px/1.6 v
 #measure{position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none}
 .toast{font:500 12px var(--mono);color:var(--muted)}
 [hidden]{display:none!important}
+.vid-in{padding:16px;display:grid;gap:14px}
+.vid-h{display:grid;gap:4px}
+.vid-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.vid-grid .wide{grid-column:1 / -1}
+@media (max-width:600px){.vid-grid{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){.stage{transition:none}.dots{animation:none}}
 </style>
 
@@ -260,10 +265,39 @@ pre{margin:0;background:var(--code-bg);color:var(--code-ink);font:400 12px/1.6 v
     </div>
     <p class="enote" id="note"></p>
     <pre id="code" tabindex="0"></pre>
-  </section>
+</section>
+
+<section class="card vid" aria-label="Video export">
+<div class="vid-in">
+<div class="vid-h">
+<span class="lbl">Video for Reels &amp; TikTok</span>
+<p class="hint">Downloads an MP4 of your animation on the preview background, ready to post.</p>
+</div>
+<div class="vid-grid">
+<label class="sf">Format
+<select id="vfmt">
+<option value="1080x1920">Reel / TikTok (9:16)</option>
+<option value="1080x1350">Instagram post (4:5)</option>
+<option value="1080x1080">Square (1:1)</option>
+</select>
+</label>
+<label class="sf">Hold at the end (s)
+<input type="number" id="vhold" min="0" max="10" step="0.5" value="2">
+</label>
+<label class="sf wide">Headline (optional)
+<input type="text" id="vtext" maxlength="60" placeholder="Example: Our new logo, now in motion">
+</label>
+</div>
+<div class="row">
+<button class="btn primary" id="vgo" type="button">Download MP4</button>
+<span class="toast" id="vstatus" role="status"></span>
+</div>
+</div>
+</section>
 </div>
 <div id="measure" aria-hidden="true"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/mp4-muxer@5/build/mp4-muxer.min.js"></script>
 <script>
 (function(){
 'use strict';
@@ -300,7 +334,12 @@ const PRESETS={
   slide:{name:'Slide',desc:'Enters from alternating sides'},
   fade:{name:'Fade',desc:'Simple fade in'},
   blur:{name:'Focus',desc:'Blur sharpens as it fades in'},
-  breathe:{name:'Breathe',desc:'Gentle looping pulse',loop:true}
+emerge:{name:'Emerge',desc:'Rises from behind a line'},
+wave:{name:'Roll in',desc:'Glides in from the side like a wave'},
+orbit:{name:'Orbit in',desc:'Swings in along a curved path'},
+breathe:{name:'Breathe',desc:'Gentle looping pulse',loop:true},
+float:{name:'Float',desc:'Gentle looping hover',loop:true},
+sway:{name:'Sway',desc:'Gentle looping tilt',loop:true}
 };
 const ORDERS={doc:'Same as the file',ltr:'Left to right',ttb:'Top to bottom',mid:'Center outward'};
 
@@ -646,21 +685,28 @@ function kfFor(P,vb){
     slide:'@keyframes al-slide{from{opacity:0;transform:translateX(-'+dx+'px)}to{opacity:1;transform:none}}\n@keyframes al-slide-r{from{opacity:0;transform:translateX('+dx+'px)}to{opacity:1;transform:none}}\n',
     fade:'@keyframes al-fade{from{opacity:0}to{opacity:1}}\n',
     blur:'@keyframes al-blur{from{opacity:0;filter:blur('+bl+'px);transform:scale(1.15)}to{opacity:1;filter:blur(0);transform:none}}\n',
-    breathe:'@keyframes al-breathe{from{transform:scale(1)}to{transform:scale(1.06)}}\n'
+    emerge:'@keyframes al-emerge{from{transform:translateY(100%);clip-path:inset(0 0 100% 0)}to{transform:none;clip-path:inset(0 0 0 0)}}\n',
+wave:'@keyframes al-wave{0%{opacity:0;transform:translate(-'+dx+'px,'+r2(dy*.6)+'px)}60%{opacity:1;transform:translate('+r2(dx*.08)+'px,-'+r2(dy*.2)+'px)}100%{opacity:1;transform:none}}\n',
+orbit:'@keyframes al-orbit{0%{opacity:0;transform:rotate(-110deg)}40%{opacity:1}100%{opacity:1;transform:none}}\n',
+breathe:'@keyframes al-breathe{from{transform:scale(1)}to{transform:scale(1.06)}}\n',
+float:'@keyframes al-float{from{transform:translateY(0)}to{transform:translateY(-'+r2(dy*.35)+'px)}}\n',
+sway:'@keyframes al-sway{from{transform:rotate(-4deg)}to{transform:rotate(4deg)}}\n'
   }[P]||'';
 }
-function buildCSS(S){
-  const vb=state.an.vb,cnt={},used={};
+function buildCSS(S,off){
+const vb=state.an.vb,cnt={},used={},frozen=typeof off==='number';
   Object.keys(S.info).forEach(i=>{cnt[S.info[i].k]=(cnt[S.info[i].k]||0)+1});
   let c='.al-p{transform-box:fill-box;transform-origin:center}\n',hasDraw=false,hasFade=false;
   state.steps.forEach((st,k)=>{
     if(!cnt[k])return;
-    const P=st.preset;
-    let r='.al-s'+k+'{animation-duration:'+st.dur+'s;animation-timing-function:'+EASES[st.ease].css+';animation-delay:calc(var(--i) * '+st.stagger+'s + '+st.start+'s);animation-fill-mode:both;';
+    const P=st.preset,st0=frozen?r2(st.start-off):st.start;
+let r='.al-s'+k+'{animation-duration:'+st.dur+'s;animation-timing-function:'+EASES[st.ease].css+';animation-delay:calc(var(--i) * '+st.stagger+'s + '+st0+'s);animation-fill-mode:both;';
+if(frozen)r+='animation-play-state:paused;';
     if(P==='draw'){hasDraw=true}
     else{
       r+='animation-name:al-'+P+';';
       if(PRESETS[P].loop)r+='animation-iteration-count:infinite;animation-direction:alternate;animation-timing-function:ease-in-out;';
+if(P==='orbit')r+='transform-origin:50% 260%;';
       used[P]=1;
     }
     c+=r+'}\n';
@@ -675,7 +721,7 @@ function buildCSS(S){
     used.fade=1;
   }
   Object.keys(used).forEach(P=>{c+=kfFor(P,vb)});
-  c+='@media (prefers-reduced-motion:reduce){.al-p,.al-dr,.al-fb{animation:none}.al-dr{stroke-dashoffset:0}.al-ds{stroke-opacity:0}}\n';
+  if(!frozen)c+='@media (prefers-reduced-motion:reduce){.al-p,.al-dr,.al-fb{animation:none}.al-dr{stroke-dashoffset:0}.al-ds{stroke-opacity:0}}\n';
   return c;
 }
 function pretty(xml){
@@ -689,7 +735,7 @@ function pretty(xml){
 }
 function addClass(e,c){e.setAttribute('class',((e.getAttribute('class')||'')+' '+c).trim())}
 function addStyle(e,s){let o=(e.getAttribute('style')||'').trim();if(o&&o.slice(-1)!==';')o+=';';e.setAttribute('style',o+s)}
-function buildSvg(){
+function buildSvg(off){
   const an=state.an,vb=an.vb,S=schedule();state.sched=S;state.total=S.total;
   const root=an.root.cloneNode(true),doc=root.ownerDocument;
   const els=getParts(root),sw=r2(vb[2]*state.sw/100);
@@ -714,7 +760,7 @@ function buildSvg(){
     }else addClass(g,'al-p '+cls+(inf.preset==='slide'&&inf.rank%2?' al-o':''));
   });
   const st=doc.createElementNS(NS,'style');
-  st.textContent='\n'+buildCSS(S);
+  st.textContent='\n'+buildCSS(S,off);
   root.insertBefore(st,root.firstChild);
   return {root:root,str:pretty(new XMLSerializer().serializeToString(root))};
 }
@@ -790,7 +836,12 @@ function rnCode(){
     slide:"opacity: v, matrix: mat(1, 0, (part.odd ? 1 : -1) * (1 - v) * DX, 0, part.cx, part.cy)",
     fade:"opacity: v",
     blur:"opacity: v, matrix: mat(1.15 - 0.15 * v, 0, 0, 0, part.cx, part.cy) /* no blur in React Native */",
-    breathe:"matrix: mat(1 + 0.06 * v, 0, 0, 0, part.cx, part.cy)"
+    breathe:"matrix: mat(1 + 0.06 * v, 0, 0, 0, part.cx, part.cy)",
+emerge:"opacity: v, matrix: mat(1, 0, 0, (1 - v) * DY * 3, part.cx, part.cy) /* no clipping in React Native */",
+wave:"opacity: Math.min(1, v * 1.6), matrix: mat(1, 0, -(1 - v) * DX, Math.sin(v * Math.PI) * -DY * 0.3 + (1 - v) * DY * 0.6, part.cx, part.cy)",
+orbit:"opacity: Math.min(1, v * 2.5), matrix: mat(1, -110 * (1 - v), 0, 0, part.cx, part.cy + DY * 8)",
+float:"matrix: mat(1, 0, 0, -DY * 0.35 * v, part.cx, part.cy)",
+sway:"matrix: mat(1, -4 + 8 * v, 0, 0, part.cx, part.cy)"
   };
   const hasDraw=!!presetsUsed.draw,other=Object.keys(presetsUsed).filter(k=>k!=='draw');
   let switchCode='';
@@ -985,10 +1036,10 @@ function partsTable(){
   return rows.join('\n')+(allParts().length>120?'\n(only the first 120 parts are listed)':'');
 }
 const PLAN_RULES=
-'Each step is {"name": short label, "parts": [part indices], "preset": one of draw|rise|drop|pop|zoom|spin|slide|fade|blur|breathe, '+
+'Each step is {"name": short label, "parts": [part indices], "preset": one of draw|rise|drop|pop|zoom|spin|slide|fade|blur|emerge|wave|orbit|breathe|float|sway, '+
 '"start": seconds from 0, "duration": 0.2-2, "stagger": seconds between parts inside the step 0-0.4, "ease": out|inout|over|std|lin, "order": doc|ltr|ttb|mid}. '+
 'Presets: draw = outlines trace then fill in, rise = floats up, drop = falls from above, pop = scales in with a bounce, zoom = shrinks from large, spin = rotates in, '+
-'slide = enters from alternating sides, fade, blur = focus pull, breathe = gentle looping pulse (use only as a final accent). '+
+'slide = enters from alternating sides, fade, blur = focus pull, emerge = rises from behind its own bottom edge like a sunrise, wave = glides in from the left with a soft wave motion (good for stripes, waves, lines), orbit = swings in along a curved path (good for dots, planets, small accents), breathe = gentle looping pulse, float = gentle looping hover, sway = gentle looping tilt (use loops only as a final accent). '+
 'Easing: out = smooth deceleration, inout = symmetrical, over = overshoot/bounce, std = standard, lin = linear. '+
 'Order sets which part of the step goes first: doc = file order, ltr = left to right, ttb = top to bottom, mid = center outward. '+
 'Use only part indices from the table. Sequence steps with start times so the whole animation lasts between 1.5 and 4 seconds. Parts left out of every step stay still.';
@@ -1128,6 +1179,80 @@ async function getDownloads(){
   try{state.downloads=(window.claude&&window.claude.use)?await window.claude.use('downloads'):null}catch(e){state.downloads=null}
   return state.downloads;
 }
+/* ================= Video export (MP4) ================= */
+const VFPS=30;
+function vLum(hex){
+const h=String(hex||'#ffffff').replace('#','');const n=parseInt(h.length===3?h.split('').map(c=>c+c).join(''):h,16);
+return (0.2126*((n>>16)&255)+0.7152*((n>>8)&255)+0.0722*(n&255))/255;
+}
+function vImage(str){
+return new Promise((res,rej)=>{
+const url=URL.createObjectURL(new Blob([str],{type:'image/svg+xml'}));
+const img=new Image();
+img.onload=()=>{URL.revokeObjectURL(url);res(img)};
+img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error('frame'))};
+img.src=url;
+});
+}
+async function vCodec(W,H){
+const list=['avc1.640032','avc1.640028','avc1.4d0032','avc1.42003e'];
+for(const codec of list){
+try{const s=await VideoEncoder.isConfigSupported({codec:codec,width:W,height:H,bitrate:8e6,framerate:VFPS});if(s.supported)return codec}catch(e){}
+}
+return null;
+}
+async function exportVideo(){
+const st=$('vstatus'),btn=$('vgo');
+if(!state.an){st.textContent='Load a logo first.';return}
+if(!('VideoEncoder' in window)||!window.Mp4Muxer){st.textContent='Video export needs a recent Chrome or Edge on a computer.';return}
+const wh=$('vfmt').value.split('x').map(Number),W=wh[0],H=wh[1];
+const codec=await vCodec(W,H);
+if(!codec){st.textContent='This browser cannot encode MP4 video.';return}
+btn.disabled=true;
+try{
+const S=schedule(),hold=clamp(parseFloat($('vhold').value)||0,0,10);
+const dur=S.total+hold+0.3,frames=Math.round(dur*VFPS);
+const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+const cx=cv.getContext('2d');
+const vb=state.an.vb,bg=state.bg||'#FFFFFF',dark=vLum(bg)<0.5;
+const headline=($('vtext').value||'').trim();
+const boxW=W*0.72,boxH=H*(H>W?0.42:0.55);
+const sc=Math.min(boxW/vb[2],boxH/vb[3]);
+const lw=vb[2]*sc,lh=vb[3]*sc,lx=(W-lw)/2,ly=(H>W?H*0.47:H*0.52)-lh/2;
+if(headline)await document.fonts.ready;
+const muxer=new Mp4Muxer.Muxer({target:new Mp4Muxer.ArrayBufferTarget(),video:{codec:'avc',width:W,height:H},fastStart:'in-memory'});
+let failed=null;
+const enc=new VideoEncoder({output:(chunk,meta)=>muxer.addVideoChunk(chunk,meta),error:e=>{failed=e}});
+enc.configure({codec:codec,width:W,height:H,bitrate:8e6,framerate:VFPS});
+for(let i=0;i<frames;i++){
+if(failed)throw failed;
+const t=Math.max(0,i/VFPS-0.3);
+const img=await vImage(buildSvg(t).str);
+cx.fillStyle=bg;cx.fillRect(0,0,W,H);
+cx.drawImage(img,lx,ly,lw,lh);
+if(headline){
+cx.fillStyle=dark?'#FFFFFF':'#14161C';
+cx.textAlign='center';cx.textBaseline='alphabetic';
+cx.font='600 '+Math.round(W*0.062)+'px "Familjen Grotesk", system-ui, sans-serif';
+cx.fillText(headline,W/2,ly-H*0.06,W*0.86);
+}
+const vf=new VideoFrame(cv,{timestamp:Math.round(i*1e6/VFPS),duration:Math.round(1e6/VFPS)});
+enc.encode(vf,{keyFrame:i%VFPS===0});vf.close();
+if(i%10===0){st.textContent='Rendering '+Math.round(i/frames*100)+'%';await new Promise(r=>setTimeout(r,0))}
+}
+await enc.flush();muxer.finalize();
+const blob=new Blob([muxer.target.buffer],{type:'video/mp4'});
+const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+a.download=String(state.name||'logo').replace(/\.[^.]+$/,'')+'-motion.mp4';
+document.body.appendChild(a);a.click();a.remove();
+setTimeout(()=>URL.revokeObjectURL(a.href),5000);
+st.textContent='Done. Add music in Instagram or TikTok when you post.';
+}catch(e){
+st.textContent='The video could not be created. Try a shorter animation or another browser.';
+}finally{btn.disabled=false;update()}
+}
+$('vgo').addEventListener('click',exportVideo);
+
 function showErr(msg){const e=$('err');e.textContent=msg;e.hidden=!msg}
 function showPane(p){
   Array.prototype.forEach.call(document.querySelectorAll('.ptab'),t=>t.setAttribute('aria-selected',String(t.dataset.pane===p)));
